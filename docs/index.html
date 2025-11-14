@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Агрегатор скидок</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Поиск товаров</h1>
+        <p>Последнее обновление: <span id="last-updated">...</span></p>
+    </header>
+
+    <main>
+        <div class="controls">
+            <input type="text" id="search-input" placeholder="Введите название товара...">
+            
+            <select id="sort-select">
+                <option value="default">По умолчанию</option>
+                <option value="price_asc">По цене (сначала дешевые)</option>
+                <option value="price_desc">По цене (сначала дорогие)</option>
+                <option value="discount_desc">По размеру скидки</option>
+            </select>
+        </div>
+
+        <div class="content-area">
+            <aside class="filters">
+                <h2>Категории</h2>
+                <div id="filters-container">Загрузка...</div>
+            </aside>
+            <section id="results-container">
+                <p>Загрузка данных...</p>
+            </section>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
