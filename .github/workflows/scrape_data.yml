@@ -1,0 +1,41 @@
+name: Scrape Retailer Data
+
+on:
+  schedule:
+    # Запускать каждые 12 часов (в 00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+    # Добавляет кнопку для ручного запуска
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scraper/requirements.txt
+
+      - name: Run scraper
+        run: python scraper/scraper.py
+
+      - name: Commit and push if changed
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add docs/data.json
+          # Проверяем, есть ли изменения для коммита
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Automated data update"
+            git push
+          fi
