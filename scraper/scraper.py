@@ -1,98 +1,181 @@
-import requests
 import json
-import datetime
 import time
+import datetime
+import requests
+from bs4 import BeautifulSoup
 
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+DATA_FILE = "docs/data.json"
+LOG_FILE = "scraper.log"
+
+# ---------------------------
+# ЛОГГЕР
+# ---------------------------
+def log(msg: str):
+    timestamp = datetime.datetime.utcnow().isoformat()
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(f"{timestamp} {msg}\n")
+    print(msg)
+
+
+# ---------------------------
+# ЗАГОЛОВКИ ДЛЯ ОБХОДА 403
+# ---------------------------
+HEADERS_5KA = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://5ka.ru/",
+    "Origin": "https://5ka.ru",
 }
 
-def scrape_pyaterochka():
-    """Обходит основные категории Пятёрочки и собирает товары с первых страниц."""
-    print("--- Scraping Пятёрочка (by categories) ---")
-    products = []
-    # Список ID основных категорий (их можно найти, анализируя запросы сайта)
+# Чижик без API — парсим HTML через их сайт
+HEADERS_CHIZHIK = {
+    "User-Agent": "Mozilla/5.0",
+}
+
+
+# ---------------------------
+# ОБНОВЛЕНИЕ JSON
+# ---------------------------
+def save_data(products: list):
+    data = {
+        "last_updated": datetime.datetime.utcnow().isoformat() + "Z",
+        "products": products,
+    }
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+# ======================================================
+#                 ПЯТЁРОЧКА
+# ======================================================
+def scrape_5ka():
+    log("--- Scraping Пятёрочка ---")
+
     categories = {
         "Молоко, сыр, яйца": 43,
-        "Мясо, птица, колбаса": 34,
-        "Овощи, фрукты, грибы": 38,
-        "Хлеб, выпечка": 44
+        "Мясо и колбасы": 34,
+        "Овощи, фрукты": 38,
+        "Хлеб": 44,
     }
 
-    for cat_name, cat_id in categories.items():
-        print(f"Scraping category: {cat_name}...")
-        url = f"https://5ka.ru/api/v2/products/?records_per_page=100&page=1&categories={cat_id}"
+    products = []
+
+    session = requests.Session()
+
+    for title, cid in categories.items():
+        log(f"Пятёрочка: категория '{title}'...")
+
+        url = (
+            "https://5ka.ru/api/v2/products/"
+            f"?records_per_page=100&page=1&categories={cid}"
+        )
+
         try:
-            response = requests.get(url, headers=HEADERS, timeout=20)
-            response.raise_for_status()
-            data = response.json().get('results', [])
-            
-            for item in data:
-                products.append({
-                    'retailer': 'Пятёрочка',
-                    'name': item.get('name', 'N/A'),
-                    'price': item.get('current_price'),
-                    'old_price': item.get('old_price'),
-                    'discount_percent': item.get('promo', {}).get('value'),
-                    'img_url': item.get('img_link'),
-                    'category': cat_name
-                })
-            time.sleep(2) # Задержка, чтобы не забанили
+            r = session.get(url, headers=HEADERS_5KA, timeout=10)
+            if r.status_code == 403:
+                log(f"❌ 403 Forbidden — Пятёрочка блокирует доступ")
+                continue
+
+            r.raise_for_status()
+
+            data = r.json()
+
+            if "results" in data:
+                for item in data["results"]:
+                    products.append({
+                        "title": item.get("name", ""),
+                        "price": item.get("current_prices", {}).get("price_reg__min", ""),
+                        "store": "Пятёрочка",
+                    })
+
         except Exception as e:
-            print(f"Error in category '{cat_name}': {e}")
+            log(f"Ошибка категории '{title}': {e}")
+
     return products
 
+
+# ======================================================
+#                     ЧИЖИК
+# ======================================================
 def scrape_chizhik():
-    """Собирает товары из Чижика по нескольким популярным поисковым запросам, так как у него нет API категорий."""
-    print("\n--- Scraping Чижик (expanding search) ---")
-    products = []
-    # Максимально расширяем список поисковых запросов для покрытия основных товаров
+    log("--- Scraping Чижик ---")
+
     search_terms = [
-        "молоко", "хлеб", "сыр", "масло", "курица", "яйцо", "кофе", "чай",
-        "сахар", "соль", "мука", "макароны", "вода", "сок", "колбаса", "сосиски",
-        "овощи", "фрукты", "шоколад", "печенье"
+        "молоко", "хлеб", "сыр", "масло", "курица", "яйцо",
+        "кофе", "чай", "сахар", "соль", "мука", "макароны",
+        "вода", "сок", "колбаса", "сосиски", "овощи", "фрукты"
     ]
-    
+
+    products = []
+    session = requests.Session()
+
     for term in search_terms:
-        print(f"Searching for '{term}' in Чижик...")
-        url = f"https://app.chizhik.club/api/v1/catalog/unauthorized/products/?city_id=a309e4ce-2f36-4106-b1ca-53e0f48a6d95&term={term}"
+        log(f"Чижик: поиск '{term}'...")
+
         try:
-            response = requests.get(url, headers=HEADERS, timeout=15)
-            response.raise_for_status()
-            data = response.json().get('products', [])
-            
-            for item in data:
+            url = f"https://chizhik.club/catalogsearch/result/?q={term}"
+            r = session.get(url, headers=HEADERS_CHIZHIK, timeout=10)
+
+            if r.status_code != 200:
+                log(f"Ошибка {r.status_code} при поиске '{term}'")
+                continue
+
+            soup = BeautifulSoup(r.text, "html.parser")
+
+            items = soup.select(".product-item")
+
+            for item in items:
+                name = item.select_one(".product-item__name")
+                price = item.select_one(".price__main-value")
+
+                if not name:
+                    continue
+
                 products.append({
-                    'retailer': 'Чижик',
-                    'name': item.get('title', 'N/A'),
-                    'price': item.get('price'),
-                    'old_price': item.get('old_price'),
-                    'discount_percent': round((1 - item['price'] / item['old_price']) * 100) if item.get('old_price') and item.get('price') else None,
-                    'img_url': item.get('image', {}).get('src'),
-                    'category': item.get('tags', [{}])[0].get('name', 'Продукты')
+                    "title": name.text.strip(),
+                    "price": price.text.strip() if price else "",
+                    "store": "Чижик",
                 })
-            time.sleep(2) # Обязательная задержка!
+
         except Exception as e:
-            print(f"An unexpected error occurred with Чижик for term '{term}': {e}")
+            log(f"Чижик ошибка '{term}': {e}")
+
     return products
+
+
+# ======================================================
+#                 МЕРЖ ТОВАРОВ
+# ======================================================
+def merge_products(list_a, list_b):
+    combined = {}
+
+    for item in list_a + list_b:
+        key = item["title"].lower()
+        if key not in combined:
+            combined[key] = item
+
+    return list(combined.values())
+
+
+# ======================================================
+#                    MAIN
+# ======================================================
+def main():
+    start = time.time()
+    log("=== START SCRAPER ===")
+
+    p1 = scrape_5ka()
+    p2 = scrape_chizhik()
+
+    merged = merge_products(p1, p2)
+
+    log(f"Всего товаров: {len(merged)}")
+
+    save_data(merged)
+
+    log(f"Готово за {round(time.time() - start, 2)} сек")
+    log("=== END ===")
+
 
 if __name__ == "__main__":
-    start_time = time.time()
-    all_products = []
-    all_products.extend(scrape_pyaterochka())
-    all_products.extend(scrape_chizhik())
-    
-    # Удаляем дубликаты, оставляя только уникальные товары
-    unique_products = list({ (p['name'], p['retailer']): p for p in all_products }.values())
-    
-    output_data = {
-        "last_updated": datetime.datetime.utcnow().isoformat() + "Z",
-        "products": unique_products
-    }
-    
-    with open('docs/data.json', 'w', encoding='utf-8') as f:
-        json.dump(output_data, f, ensure_ascii=False, indent=4)
-    
-    end_time = time.time()
-    print(f"\nFinished in {end_time - start_time:.2f} seconds.")
-    print(f"Total unique products found: {len(unique_products)}")
+    main()
