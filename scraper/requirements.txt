@@ -1,2 +1,4 @@
 requests
+
 beautifulsoup4
+pyaterochka_api
